@@ -7,6 +7,7 @@ import helpers
 mcp = FastMCP("Mercurial MCP", mask_error_details=True)
 
 HG_REPO_ROOT = os.environ.get("HG_REPO_ROOT")
+TOKEN_LIMIT = os.environ.get("TOKEN_LIMIT", 4096) # decrease in case client fails with unknown error
 
 if not HG_REPO_ROOT:
     raise ValueError("HG_REPO_ROOT environment variable is not set")
@@ -16,6 +17,7 @@ if not os.path.exists(HG_REPO_ROOT) or not os.path.isdir(HG_REPO_ROOT):
 
 # get parent directory of HG_REPO_ROOT
 CWD = os.path.dirname(HG_REPO_ROOT)
+
 
 @mcp.tool()
 async def get_file_at_commit(commit_hash: str, file_path: str, head: int = None, tail: int = None) -> str:
@@ -41,9 +43,11 @@ async def get_file_at_commit(commit_hash: str, file_path: str, head: int = None,
         if tail is not None:
             command += f" | tail -n {tail}"
 
-        return await helpers.run_hg_command(command, CWD)
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
     except Exception as e:
         raise ToolError(str(e))
+
 
 @mcp.tool()
 async def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
@@ -71,9 +75,11 @@ async def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
         if tail is not None:
             command += f" | tail -n {tail}"
 
-        return await helpers.run_hg_command(command, CWD)
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
     except Exception as e:
         raise ToolError(str(e))
+
 
 @mcp.tool()
 async def log_commits(file_path: str = None, head: int = None, tail: int = None) -> str:
@@ -101,9 +107,11 @@ async def log_commits(file_path: str = None, head: int = None, tail: int = None)
         if tail is not None:
             command += f" | tail -n {tail}"
 
-        return await helpers.run_hg_command(command, CWD)
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
     except Exception as e:
         raise ToolError(str(e))
+
 
 @mcp.tool()
 async def get_commit_summary(commit_hash: str) -> str:
@@ -118,22 +126,17 @@ async def get_commit_summary(commit_hash: str) -> str:
         changes, stats and diff separated by respective heading.
     """
     try:
-        # Execute all three commands in parallel for better performance
         desc_task = asyncio.create_task(helpers.get_commit_desc(commit_hash, CWD))
-        stats_task = asyncio.create_task(helpers.get_commit_stats(commit_hash, CWD))
         diff_task = asyncio.create_task(helpers.get_commit_diff(commit_hash, CWD))
         
-        desc, stats, diff = await asyncio.gather(desc_task, stats_task, diff_task)
+        desc, diff = await asyncio.gather(desc_task, diff_task)
 
         return f"""
         Description:
-        {desc}
-
-        Stats:
-        {stats}
+        {desc[:1000]}
 
         Diff:
-        {diff}
+        {diff[:TOKEN_LIMIT - 1000]}
         """
     except Exception as e:
         raise ToolError(str(e))
@@ -153,9 +156,100 @@ async def search_across_files(pattern: str) -> str:
     """
     try:
         command = f"hg grep --all '{pattern}'"
-        return await helpers.run_hg_command(command, CWD)
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
     except Exception as e:
         raise ToolError(str(e))
+
+
+@mcp.tool()
+async def get_revision_summary_by_id(revision_id: str) -> str:
+    """
+    Gets the summary of revision/differential. Revisions/differentials are the
+    code changes which aren't yet committed.
+
+    Args:
+        revision_id: The id of the revision; starts with 'D'
+
+    Returns:
+        The summary of the revision. Summary includes the title,
+        description of the changes, test plan and other meta data.
+        It doesn't include the actual code changes.
+    """
+    try:
+        if not revision_id.startswith("D"):
+            raise ValueError("Revision id must start with 'D'")
+
+        revision_id = revision_id.replace("D", "")
+        command = """echo '{"constraints": {"ids": [%s]}}' | arc call-conduit -- differential.revision.search""" % revision_id
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
+    except Exception as e:
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+async def get_revision_changes_by_id(revision_id: str) -> str:
+    """
+    Gets the content of revision/differential. Revisions/differentials are the
+    code changes which aren't yet committed.
+
+    Args:
+        revision_id: The id of the revision; starts with 'D'
+
+    Returns:
+        Changes made as part of the revision.
+    """
+    try:
+        if not revision_id.startswith("D"):
+            raise ValueError("Revision id must start with 'D'")
+
+        command = f"arc export --revision {revision_id} --git"
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
+    except Exception as e:
+        raise ToolError(str(e))
+
+
+@mcp.tool()
+async def get_task_summary_by_id(task_id: str) -> str:
+    """
+    Gets the summary of task/maniphest. Tasks/maniphest includes
+    the information of bugs, feature requests, etc. which are yet to
+    be resolved.
+
+    Args:
+        task_id: The id of the task; starts with 'T'
+
+    Returns:
+        The summary of the task. Summary includes the title,
+        description of the changes and other meta data.
+    """
+    try:
+        if not task_id.startswith("T"):
+            raise ValueError("Task id must start with 'T'")
+
+        task_id = task_id.replace("T", "")
+        command = """echo '{"constraints": {"ids": [%s]}}' | arc call-conduit -- maniphest.search""" % task_id
+        result = await helpers.run_command_async(command, CWD)
+        return result[:TOKEN_LIMIT]
+    except Exception as e:
+        raise ToolError(str(e))
+
+
+@mcp.prompt()
+def review_revision(revision_id: str) -> str:
+    """
+    Review the given revision. Revisions are the code changes
+    which aren't yet committed.
+
+    Args:
+        revision_id: The id of the revision; starts with 'D'
+
+    Returns:
+        The review of the revision.
+    """
+    return f"Review the revision {revision_id}. Check the summary and changes of the revision. Also, in case revision in linked to a task, use it to get more context."
 
 
 if __name__ == "__main__":

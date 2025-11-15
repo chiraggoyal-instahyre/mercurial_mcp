@@ -1,8 +1,8 @@
 import asyncio
 
-async def run_hg_command(command: str, cwd: str) -> str:
+async def run_command_async(command: str, cwd: str) -> str:
     """
-    Common method to run Mercurial commands asynchronously.
+    Common method to run commands asynchronously.
     
     Args:
         command: The command to execute
@@ -32,12 +32,8 @@ async def run_hg_command(command: str, cwd: str) -> str:
 
 async def get_commit_desc(commit_hash: str, CWD: str):
     command = f"hg log -r {commit_hash} --template '{{desc}}'"
-    return await run_hg_command(command, CWD)
+    return await run_command_async(command, CWD)
 
 async def get_commit_diff(commit_hash: str, CWD: str):
     command = f"hg diff -r {commit_hash}"
-    return await run_hg_command(command, CWD)
-
-async def get_commit_stats(commit_hash: str, CWD: str):
-    command = f"hg log -r {commit_hash} --stat"
-    return await run_hg_command(command, CWD)
+    return await run_command_async(command, CWD)
