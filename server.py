@@ -237,20 +237,5 @@ async def get_task_summary_by_id(task_id: str) -> str:
         raise ToolError(str(e))
 
 
-@mcp.prompt()
-def review_revision(revision_id: str) -> str:
-    """
-    Review the given revision. Revisions are the code changes
-    which aren't yet committed.
-
-    Args:
-        revision_id: The id of the revision; starts with 'D'
-
-    Returns:
-        The review of the revision.
-    """
-    return f"Review the revision {revision_id}. Check the summary and changes of the revision. Also, in case revision in linked to a task, use it to get more context."
-
-
 if __name__ == "__main__":
     mcp.run()
