@@ -7,7 +7,7 @@ import helpers
 mcp = FastMCP("Mercurial MCP", mask_error_details=True)
 
 HG_REPO_ROOT = os.environ.get("HG_REPO_ROOT")
-TOKEN_LIMIT = os.environ.get("TOKEN_LIMIT", 4096) # decrease in case client fails with unknown error
+TOKEN_LIMIT = int(os.environ.get("TOKEN_LIMIT", 4096)) # decrease in case client fails with unknown error
 
 if not HG_REPO_ROOT:
     raise ValueError("HG_REPO_ROOT environment variable is not set")
@@ -20,47 +20,42 @@ CWD = os.path.dirname(HG_REPO_ROOT)
 
 
 @mcp.tool()
-async def get_file_at_commit(commit_hash: str, file_path: str, head: int = None, tail: int = None) -> str:
+async def get_file_at_commit(commit_hash: str, file_path: str, page: int = 1) -> dict:
     """
     Get the content of a file at a specific commit.
 
     Args:
         commit_hash: The hash of the commit.
         file_path: The absolute path of the file.
-        head: The number of lines to show from the end of the file.
-        tail: The number of lines to show from the start of the file.
+        page: The page number of the file content.
 
     Returns:
-        The content of the file at the given commit.
+        Returns a dictionary with the content of the file at the given commit
+        and meta information about the response/pagination.
     """
     try:
         relpath = os.path.relpath(file_path, CWD)
         command = f'hg cat {commit_hash} {relpath}'
 
-        if head is not None:
-            command += f" | head -n {head}"
-
-        if tail is not None:
-            command += f" | tail -n {tail}"
-
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
+async def blame_file(file_path: str, page: int = 1) -> dict:
     """
     Blames/annotates the given file.
 
     Args:
         file_path: The absolute path of the file.
-        head: The number of lines to show from the end of the file.
-        tail: The number of lines to show from the start of the file.
+        page: The page number of the blame.
 
     Returns:
-        The reponse is a string where each line is of the form:
+        Returns a dictionary with the result and meta information about
+        the response/pagination.
+        The result is a string where each line is of the form:
         <commit_hash>, <parent_commit_hash>, <author>, <date|age>, <line_content>
     """
     try:
@@ -69,30 +64,24 @@ async def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
 
         command += f" {relpath}"
 
-        if head is not None:
-            command += f" | head -n {head}"
-
-        if tail is not None:
-            command += f" | tail -n {tail}"
-
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def log_commits(file_path: str = None, head: int = None, tail: int = None) -> str:
+async def log_commits(file_path: str = None, page: int = 1) -> dict:
     """
     Returns the log of commits. If file_path is provided, returns the log of commits for that file.
 
     Args:
         file_path: The absolute path of the file.
-        head: The number of commits to show from the end of the log.
-        tail: The number of commits to show from the start of the log.
+        page: The page number of the log.
 
     Returns:
-        The log of commits.
+        Returns a dictionary with the result containing the log of commits and
+        meta information about the response/pagination.
     """
     try:
         command = "hg log"
@@ -101,80 +90,76 @@ async def log_commits(file_path: str = None, head: int = None, tail: int = None)
             relpath = os.path.relpath(file_path, CWD)
             command += f" -f {relpath}"
 
-        if head is not None:
-            command += f" --limit {head}"
-
-        if tail is not None:
-            command += f" | tail -n {tail}"
-
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def get_commit_summary(commit_hash: str) -> str:
+async def get_commit_summary(commit_hash: str, page: int = 1) -> dict:
     """
     Gets the summary of a commit.
 
     Args:
         commit_hash: The hash of the commit.
+        page: The page number of the summary.
 
     Returns:
-        The summary of the commit. Summary includes the description of the
-        changes, stats and diff separated by respective heading.
+        Returns a dictionary with the result containing the summary of the commit and
+        meta information about the response/pagination.
     """
     try:
         desc_task = asyncio.create_task(helpers.get_commit_desc(commit_hash, CWD))
         diff_task = asyncio.create_task(helpers.get_commit_diff(commit_hash, CWD))
-        
+
         desc, diff = await asyncio.gather(desc_task, diff_task)
+        result = f"""Description:\n{desc}\n\nDiff:\n{diff}"""
 
-        return f"""
-        Description:
-        {desc[:1000]}
-
-        Diff:
-        {diff[:TOKEN_LIMIT - 1000]}
-        """
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def search_across_files(pattern: str) -> str:
+async def search_across_files(pattern: str, page: int = 1) -> dict:
     """
     Searches for a pattern across all files in the repository. However,
     could be slow for large repositories, so, use when necessary.
 
     Args:
         pattern: The regex to search for.
+        page: The page number of the search results.
 
     Returns:
-        The list of files that contain the pattern along with the commit id.
+        Returns a dictionary with the result containing the list of files
+        that contain the pattern along with the commit id and
+        meta information about the response/pagination.
     """
     try:
         command = f"hg grep --all '{pattern}'"
+
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def get_revision_summary_by_id(revision_id: str) -> str:
+async def get_revision_summary_by_id(revision_id: str, page: int = 1) -> dict:
     """
     Gets the summary of revision/differential. Revisions/differentials are the
     code changes which aren't yet committed.
 
     Args:
         revision_id: The id of the revision; starts with 'D'
+        page: The page number of the summary.
 
     Returns:
-        The summary of the revision. Summary includes the title,
-        description of the changes, test plan and other meta data.
-        It doesn't include the actual code changes.
+        Returns a dictionary with the result containing the summary of the revision and
+        meta information about the response/pagination.
+        The summary includes the title, description of the changes,
+        test plan and other meta data. It doesn't include the actual code changes.
     """
     try:
         if not revision_id.startswith("D"):
@@ -182,37 +167,41 @@ async def get_revision_summary_by_id(revision_id: str) -> str:
 
         revision_id = revision_id.replace("D", "")
         command = """echo '{"constraints": {"ids": [%s]}}' | arc call-conduit -- differential.revision.search""" % revision_id
+
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def get_revision_changes_by_id(revision_id: str) -> str:
+async def get_revision_changes_by_id(revision_id: str, page: int = 1) -> dict:
     """
     Gets the content of revision/differential. Revisions/differentials are the
     code changes which aren't yet committed.
 
     Args:
         revision_id: The id of the revision; starts with 'D'
+        page: The page number of the changes.
 
     Returns:
-        Changes made as part of the revision.
+        Returns a dictionary with the result containing the changes made as part of the revision and
+        meta information about the response/pagination.
     """
     try:
         if not revision_id.startswith("D"):
             raise ValueError("Revision id must start with 'D'")
 
         command = f"arc export --revision {revision_id} --git"
+
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-async def get_task_summary_by_id(task_id: str) -> str:
+async def get_task_summary_by_id(task_id: str, page: int = 1) -> dict:
     """
     Gets the summary of task/maniphest. Tasks/maniphest includes
     the information of bugs, feature requests, etc. which are yet to
@@ -220,10 +209,12 @@ async def get_task_summary_by_id(task_id: str) -> str:
 
     Args:
         task_id: The id of the task; starts with 'T'
+        page: The page number of the summary.
 
     Returns:
-        The summary of the task. Summary includes the title,
-        description of the changes and other meta data.
+        Returns a dictionary with the result containing the summary of the task and
+        meta information about the response/pagination.
+        The summary includes the title, description of the task and other meta data.
     """
     try:
         if not task_id.startswith("T"):
@@ -231,8 +222,9 @@ async def get_task_summary_by_id(task_id: str) -> str:
 
         task_id = task_id.replace("T", "")
         command = """echo '{"constraints": {"ids": [%s]}}' | arc call-conduit -- maniphest.search""" % task_id
+
         result = await helpers.run_command_async(command, CWD)
-        return result[:TOKEN_LIMIT]
+        return helpers.get_paginated_result(result, page, TOKEN_LIMIT)
     except Exception as e:
         raise ToolError(str(e))
 

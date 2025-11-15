@@ -1,4 +1,5 @@
 import asyncio
+import re
 
 async def run_command_async(command: str, cwd: str) -> str:
     """
@@ -29,6 +30,84 @@ async def run_command_async(command: str, cwd: str) -> str:
         return stdout.decode().strip()
     except Exception as e:
         raise Exception(str(e))
+
+def get_page_boundaries(page, page_length):
+    """
+    Return the start and end indices for a given page.
+    """
+    start = (page - 1) * page_length
+    end = page * page_length
+    return start, end
+
+def get_paginated_result(result: str, page: int, page_length: int):
+    """
+    Splits the result into pages based on the given page length.
+    
+    Args:
+        result: The result to split into pages
+        page: The page number to return
+        page_length: The length of each page
+    
+    Returns:
+        A dictionary containing the result, page number, total characters,
+        and whether there are more pages
+    """
+    tokens = re.split(r'(\n)', result)
+
+    # Remove empty tokens but keep newlines
+    tokens = [token for token in tokens if token]
+
+    if not tokens:
+        return {
+            "result": "",
+            "total_chars": 0,
+            "has_more": False
+        }
+
+    # Build pages by accumulating tokens until we hit the character limit
+    # Stop early once we've found our target page
+    current_page_num = 1
+    current_page_content = []
+    current_chars = 0
+    target_page_content = ""
+    has_more = False
+
+    for i, token in enumerate(tokens):
+        token_length = len(token)
+
+        # If adding this token would exceed the limit, start a new page
+        if current_chars + token_length > page_length and current_page_content:
+            # Check if this is our target page
+            if current_page_num == page:
+                target_page_content = ''.join(current_page_content)
+                # Check if there are more tokens (indicating more pages)
+                has_more = i < len(tokens) - 1
+                break
+            
+            # Move to next page
+            current_page_num += 1
+            current_page_content = []
+            current_chars = 0
+
+        # Add token to current page
+        current_page_content.append(token)
+        current_chars += token_length
+
+    # Handle the last page or if we never hit the limit
+    if not target_page_content:
+        if current_page_num == page and current_page_content:
+            target_page_content = ''.join(current_page_content)
+            has_more = False
+        elif page > current_page_num:
+            target_page_content = ""
+            has_more = False
+
+    return {
+        "result": target_page_content,
+        "page": page,
+        "total_chars": len(target_page_content),
+        "has_more": has_more
+    }
 
 async def get_commit_desc(commit_hash: str, CWD: str):
     command = f"hg log -r {commit_hash} --template '{{desc}}'"
