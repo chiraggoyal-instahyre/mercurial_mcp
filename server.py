@@ -24,7 +24,7 @@ def get_file_at_commit(commit_hash: str, file_path: str, head: int = None, tail:
 
     Args:
         commit_hash: The hash of the commit.
-        file_path: The path of the file.
+        file_path: The absolute path of the file.
         head: The number of lines to show from the end of the file.
         tail: The number of lines to show from the start of the file.
 
@@ -62,7 +62,7 @@ def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
     Blames/annotates the given file.
 
     Args:
-        file_path: The path of the file.
+        file_path: The absolute path of the file.
         head: The number of lines to show from the end of the file.
         tail: The number of lines to show from the start of the file.
 
@@ -103,7 +103,7 @@ def log_commits(file_path: str = None, head: int = None, tail: int = None) -> st
     Returns the log of commits. If file_path is provided, returns the log of commits for that file.
 
     Args:
-        file_path: The path of the file.
+        file_path: The absolute path of the file.
         head: The number of commits to show from the end of the log.
         tail: The number of commits to show from the start of the log.
 
@@ -118,7 +118,7 @@ def log_commits(file_path: str = None, head: int = None, tail: int = None) -> st
             command += f" -f {relpath}"
 
         if head is not None:
-            command += f" | head -n {head}"
+            command += f" --limit {head}"
 
         if tail is not None:
             command += f" | tail -n {tail}"
