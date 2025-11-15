@@ -1,6 +1,6 @@
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
-import subprocess
+import asyncio
 import os
 import helpers
 
@@ -18,7 +18,7 @@ if not os.path.exists(HG_REPO_ROOT) or not os.path.isdir(HG_REPO_ROOT):
 CWD = os.path.dirname(HG_REPO_ROOT)
 
 @mcp.tool()
-def get_file_at_commit(commit_hash: str, file_path: str, head: int = None, tail: int = None) -> str:
+async def get_file_at_commit(commit_hash: str, file_path: str, head: int = None, tail: int = None) -> str:
     """
     Get the content of a file at a specific commit.
 
@@ -41,23 +41,12 @@ def get_file_at_commit(commit_hash: str, file_path: str, head: int = None, tail:
         if tail is not None:
             command += f" | tail -n {tail}"
 
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True,
-            cwd=CWD
-        )
-
-        if result.returncode != 0:
-            raise ToolError(result.stderr.strip())
-
-        return result.stdout.strip()
+        return await helpers.run_hg_command(command, CWD)
     except Exception as e:
         raise ToolError(str(e))
 
 @mcp.tool()
-def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
+async def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
     """
     Blames/annotates the given file.
 
@@ -82,23 +71,12 @@ def blame_file(file_path: str, head: int = None, tail: int = None) -> str:
         if tail is not None:
             command += f" | tail -n {tail}"
 
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True,
-            cwd=CWD
-        )
-
-        if result.returncode != 0:
-            raise ToolError(result.stderr.strip())
-
-        return result.stdout.strip()
+        return await helpers.run_hg_command(command, CWD)
     except Exception as e:
         raise ToolError(str(e))
 
 @mcp.tool()
-def log_commits(file_path: str = None, head: int = None, tail: int = None) -> str:
+async def log_commits(file_path: str = None, head: int = None, tail: int = None) -> str:
     """
     Returns the log of commits. If file_path is provided, returns the log of commits for that file.
 
@@ -123,23 +101,12 @@ def log_commits(file_path: str = None, head: int = None, tail: int = None) -> st
         if tail is not None:
             command += f" | tail -n {tail}"
 
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True,
-            cwd=CWD
-        )
-
-        if result.returncode != 0:
-            raise ToolError(result.stderr.strip())
-
-        return result.stdout.strip()
+        return await helpers.run_hg_command(command, CWD)
     except Exception as e:
         raise ToolError(str(e))
 
 @mcp.tool()
-def get_commit_summary(commit_hash: str) -> str:
+async def get_commit_summary(commit_hash: str) -> str:
     """
     Gets the summary of a commit.
 
@@ -151,29 +118,29 @@ def get_commit_summary(commit_hash: str) -> str:
         changes, stats and diff separated by respective heading.
     """
     try:
-        desc = helpers.get_commit_desc(commit_hash, CWD)
-        stats = helpers.get_commit_stats(commit_hash, CWD)
-        diff = helpers.get_commit_diff(commit_hash, CWD)
-
-        if desc.returncode != 0 or stats.returncode != 0 or diff.returncode != 0:
-            raise ToolError(desc.stderr.strip() or stats.stderr.strip() or diff.stderr.strip())
+        # Execute all three commands in parallel for better performance
+        desc_task = asyncio.create_task(helpers.get_commit_desc(commit_hash, CWD))
+        stats_task = asyncio.create_task(helpers.get_commit_stats(commit_hash, CWD))
+        diff_task = asyncio.create_task(helpers.get_commit_diff(commit_hash, CWD))
+        
+        desc, stats, diff = await asyncio.gather(desc_task, stats_task, diff_task)
 
         return f"""
         Description:
-        {desc.stdout.strip()}
+        {desc}
 
         Stats:
-        {stats.stdout.strip()}
+        {stats}
 
         Diff:
-        {diff.stdout.strip()}
+        {diff}
         """
     except Exception as e:
         raise ToolError(str(e))
 
 
 @mcp.tool()
-def search_across_files(pattern: str) -> str:
+async def search_across_files(pattern: str) -> str:
     """
     Searches for a pattern across all files in the repository. However,
     could be slow for large repositories, so, use when necessary.
@@ -186,18 +153,7 @@ def search_across_files(pattern: str) -> str:
     """
     try:
         command = f"hg grep --all '{pattern}'"
-        result = subprocess.run(
-            command, 
-            shell=True, 
-            capture_output=True, 
-            text=True,
-            cwd=CWD
-        )
-
-        if result.returncode != 0:
-            raise ToolError(result.stderr.strip())
-
-        return result.stdout.strip()
+        return await helpers.run_hg_command(command, CWD)
     except Exception as e:
         raise ToolError(str(e))
 
